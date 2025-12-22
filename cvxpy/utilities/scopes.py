@@ -17,6 +17,7 @@ import contextlib
 from typing import Generator
 
 _dpp_scope_active = False
+_ignore_nan_scope_active = False
 
 
 @contextlib.contextmanager
@@ -47,3 +48,30 @@ def dpp_scope() -> Generator[None, None, None]:
 def dpp_scope_active() -> bool:
     """Returns True if a `dpp_scope` is active. """
     return _dpp_scope_active
+
+
+@contextlib.contextmanager
+def ignore_nan_scope() -> Generator[None, None, None]:
+    """Context manager to disable NaN/Inf validation during problem solving.
+
+    When this scope is active, `ParamConeProg.apply_parameters()` will not
+    raise an error if problem data contains NaN or Inf values. This is useful
+    when solving problems where NaN/Inf values are intentional (e.g., for
+    testing solver robustness).
+
+    Example:
+        with ignore_nan_scope():
+            problem.solve()  # No error even if data contains NaN/Inf
+    """
+    global _ignore_nan_scope_active
+    prev_state = _ignore_nan_scope_active
+    _ignore_nan_scope_active = True
+    try:
+        yield
+    finally:
+        _ignore_nan_scope_active = prev_state
+
+
+def ignore_nan_scope_active() -> bool:
+    """Returns True if an `ignore_nan_scope` is active."""
+    return _ignore_nan_scope_active

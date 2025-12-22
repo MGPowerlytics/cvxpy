@@ -52,6 +52,7 @@ from cvxpy.reductions.utilities import (
     nonpos2nonneg,
 )
 from cvxpy.utilities.coeff_extractor import CoeffExtractor
+from cvxpy.utilities.scopes import ignore_nan_scope_active
 
 
 class ConeDims:
@@ -192,14 +193,16 @@ class ParamConeProg(ParamProb):
         # whether this param cone prog has been formatted for a solver
         self.formatted = formatted
 
+        # Flag to skip NaN/Inf validation (set via solver_opts['ignore_nan'])
+        self.ignore_nan = False
+
     def is_mixed_integer(self) -> bool:
         """Is the problem mixed-integer?"""
         return self.x.attributes['boolean'] or \
             self.x.attributes['integer']
 
     def apply_parameters(self, id_to_param_value=None, zero_offset: bool = False,
-                         keep_zeros: bool = False, quad_obj: bool = False,
-                         ignore_unknown_params: bool = False):
+                         keep_zeros: bool = False, quad_obj: bool = False):
         """Returns A, b after applying parameters (and reshaping).
 
         Args:
@@ -209,7 +212,6 @@ class ParamConeProg(ParamProb):
           keep_zeros: (optional) if True, store explicit zeros in A where
                         parameters are affected.
           quad_obj: (optional) if True, include quadratic objective term.
-          ignore_unknown_params: (optional) if True, skip NaN/Inf validation.
         """
         self.reduced_A.cache(keep_zeros)
 
@@ -230,10 +232,12 @@ class ParamConeProg(ParamProb):
         b = np.atleast_1d(b)
 
         # Validate for NaN/Inf unless:
-        # 1. explicitly ignored via ignore_unknown_params, or
-        # 2. any parameter values are None (DPP compilation without values)
+        # 1. self.ignore_nan is True (set via solver_opts), or
+        # 2. ignore_nan_scope is active (context manager), or
+        # 3. any parameter values are None (DPP compilation without values)
         should_validate = (
-            not ignore_unknown_params
+            not self.ignore_nan
+            and not ignore_nan_scope_active()
             and all(p.value is not None for p in self.parameters)
         )
         if should_validate:

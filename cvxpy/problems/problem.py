@@ -15,6 +15,7 @@ limitations under the License.
 """
 from __future__ import annotations
 
+import contextlib
 import time
 import warnings
 from collections import namedtuple
@@ -56,6 +57,7 @@ from cvxpy.settings import SOLVERS
 from cvxpy.utilities import debug_tools
 from cvxpy.utilities.citations import CITATION_DICT
 from cvxpy.utilities.deterministic import unique_list
+from cvxpy.utilities.scopes import ignore_nan_scope
 
 SolveResult = namedtuple(
     'SolveResult',
@@ -794,6 +796,12 @@ class Problem(u.Canonical):
             for reduction in solving_chain.reductions:
                 reduction.update_parameters(self)
 
+            # Set ignore_nan flag on param_prog if specified in solver_opts
+            if solver_opts and solver_opts.get('ignore_nan', False):
+                self._cache.param_prog.ignore_nan = True
+            else:
+                self._cache.param_prog.ignore_nan = False
+
             data, solver_inverse_data = solving_chain.solver.apply(
                 self._cache.param_prog)
             inverse_data = self._cache.inverse_data + [solver_inverse_data]
@@ -828,6 +836,9 @@ class Problem(u.Canonical):
                         '(Subsequent compilations of this problem, using the '
                         'same arguments, should ' 'take less time.)')
                 self._cache.param_prog = data[s.PARAM_PROB]
+                # Set ignore_nan flag on param_prog if specified in solver_opts
+                if solver_opts and solver_opts.get('ignore_nan', False):
+                    self._cache.param_prog.ignore_nan = True
                 # the last datum in inverse_data corresponds to the solver,
                 # so we shouldn't cache it
                 self._cache.inverse_data = inverse_data[:-1]
@@ -1198,35 +1209,42 @@ class Problem(u.Canonical):
                 self.unpack(chain.retrieve(soln))
                 return self.value
 
-        data, solving_chain, inverse_data = self.get_problem_data(
-            solver, gp, enforce_dpp, ignore_dpp, verbose, canon_backend, kwargs
+        # Use ignore_nan_scope if ignore_nan is specified in solver options
+        nan_scope = (
+            ignore_nan_scope() if kwargs.get('ignore_nan', False)
+            else contextlib.nullcontext()
         )
 
-        if verbose:
-            print(_NUM_SOLVER_STR)
-            s.LOGGER.info(
-                    'Invoking solver %s  to obtain a solution.',
-                    solving_chain.reductions[-1].name())
-        start = time.time()
-        solver_verbose = kwargs.pop('solver_verbose', verbose)
-        if solver_verbose and (not verbose):
-            print(_NUM_SOLVER_STR)
-        if verbose and bibtex:
-            print(_CITATION_STR)
+        with nan_scope:
+            data, solving_chain, inverse_data = self.get_problem_data(
+                solver, gp, enforce_dpp, ignore_dpp, verbose, canon_backend, kwargs
+            )
 
-            # Cite CVXPY papers.
-            print(CITATION_DICT["CVXPY"])
+            if verbose:
+                print(_NUM_SOLVER_STR)
+                s.LOGGER.info(
+                        'Invoking solver %s  to obtain a solution.',
+                        solving_chain.reductions[-1].name())
+            start = time.time()
+            solver_verbose = kwargs.pop('solver_verbose', verbose)
+            if solver_verbose and (not verbose):
+                print(_NUM_SOLVER_STR)
+            if verbose and bibtex:
+                print(_CITATION_STR)
 
-            # Cite problem grammar.
-            if self.is_dcp():
-                print(CITATION_DICT["DCP"]) 
-            if gp:
-                print(CITATION_DICT["DGP"]) 
+                # Cite CVXPY papers.
+                print(CITATION_DICT["CVXPY"])
 
-            # Cite solver.
-            print(solving_chain.reductions[-1].cite(data))
-        solution = solving_chain.solve_via_data(
-            self, data, warm_start, solver_verbose, kwargs)
+                # Cite problem grammar.
+                if self.is_dcp():
+                    print(CITATION_DICT["DCP"]) 
+                if gp:
+                    print(CITATION_DICT["DGP"]) 
+
+                # Cite solver.
+                print(solving_chain.reductions[-1].cite(data))
+            solution = solving_chain.solve_via_data(
+                self, data, warm_start, solver_verbose, kwargs)
         end = time.time()
         self._solve_time = end - start
         self.unpack_results(solution, solving_chain, inverse_data)
